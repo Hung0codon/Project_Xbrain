@@ -1,0 +1,6 @@
+S3 Application=AIRagChatbot — 4 found:
+------------------------------------------------------------------------------
+  webapp-group10-backend-bucket bucket         active        Application=AIRagChatbot CostCenter=G10 Environment=Production Name=webapp-group10-backend-bucket Owner=hungqt
+  webapp-group10-config-bucket bucket         active        Application=AIRagChatbot CostCenter=G10 Environment=Production Name=webapp-group10-config-bucket Owner=hungqt
+  webapp-group10-frontend-bucket bucket         active        Application=AIRagChatbot CostCenter=G10 Environment=Production Name=webapp-group10-frontend-bucket Owner=hungqt
+  webapp-group10-knowledge-base-data-source bucket         active        Application=AIRagChatbot CostCenter=G10 Environment=Production Name=webapp-group10-knowledge-base-data-source Owner=hungqt
