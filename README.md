@@ -11,11 +11,7 @@ Group 10 submission for the W6 XBrain side challenge.
 
 ## Team
 
-| Member | Role |
-|---|---|
-| _(fill in real names)_ | _(role)_ |
-
-> Reviewers: replace the placeholder team table with real member names before submission.
+**Group 10** — solo submission.
 
 ---
 
