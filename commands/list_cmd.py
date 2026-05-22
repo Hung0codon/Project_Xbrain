@@ -35,55 +35,93 @@ VERIFY
     pytest tests/test_list.py -v
 """
 import boto3
+from botocore.exceptions import ClientError
 
 from commands._common import parse_kv, tags_to_dict, tags_match
 
 
 def _list_ec2(want, missing):
-    """List EC2 instances matching tag filters.
-
-    Args:
-        want: list of (key, value) tag pairs that must all match
-        missing: list of tag keys that must NOT be present
-
-    Returns:
-        list of (instance_id, instance_type, state, tags_dict) tuples
-    """
-    raise NotImplementedError("TODO: implement _list_ec2 — see test_list.py for expected behavior")
+    """List EC2 instances matching tag filters."""
+    ec2 = boto3.client("ec2")
+    rows = []
+    paginator = ec2.get_paginator("describe_instances")
+    for page in paginator.paginate():
+        for reservation in page.get("Reservations", []):
+            for inst in reservation.get("Instances", []):
+                state = inst.get("State", {}).get("Name", "unknown")
+                if state == "terminated":
+                    continue
+                tags = tags_to_dict(inst.get("Tags"))
+                if not tags_match(tags, want, missing):
+                    continue
+                rows.append((
+                    inst["InstanceId"],
+                    inst.get("InstanceType", "unknown"),
+                    state,
+                    tags,
+                ))
+    return rows
 
 
 def _list_rds(want, missing):
-    """Same shape as _list_ec2 but for RDS DB instances.
-
-    Note: RDS tags require a separate API call per DB:
-        rds.list_tags_for_resource(ResourceName=db['DBInstanceArn'])
-
-    Returns:
-        list of (db_id, db_class, db_status, tags_dict) tuples
-    """
-    raise NotImplementedError("TODO: implement _list_rds")
+    """List RDS DB instances matching tag filters."""
+    rds = boto3.client("rds")
+    rows = []
+    paginator = rds.get_paginator("describe_db_instances")
+    for page in paginator.paginate():
+        for db in page.get("DBInstances", []):
+            arn = db["DBInstanceArn"]
+            try:
+                tag_resp = rds.list_tags_for_resource(ResourceName=arn)
+                tags = tags_to_dict(tag_resp.get("TagList"))
+            except ClientError:
+                tags = {}
+            if not tags_match(tags, want, missing):
+                continue
+            rows.append((
+                db["DBInstanceIdentifier"],
+                db.get("DBInstanceClass", "unknown"),
+                db.get("DBInstanceStatus", "unknown"),
+                tags,
+            ))
+    return rows
 
 
 def _list_s3(want, missing):
-    """List S3 buckets matching tag filters.
-
-    Note: get_bucket_tagging raises ClientError if no tagging config exists
-    for that bucket. Treat that as an empty tags dict, not an error.
-
-    Returns:
-        list of (bucket_name, "bucket", "active", tags_dict) tuples
-    """
-    raise NotImplementedError("TODO: implement _list_s3")
+    """List S3 buckets matching tag filters."""
+    s3 = boto3.client("s3")
+    rows = []
+    for b in s3.list_buckets().get("Buckets", []):
+        name = b["Name"]
+        try:
+            tag_resp = s3.get_bucket_tagging(Bucket=name)
+            tags = tags_to_dict(tag_resp.get("TagSet"))
+        except ClientError:
+            tags = {}
+        if not tags_match(tags, want, missing):
+            continue
+        rows.append((name, "bucket", "active", tags))
+    return rows
 
 
 def _list_volume(want, missing):
-    """List EBS volumes matching tag filters.
-
-    Returns:
-        list of (volume_id, "<type>-<size>GB", state, tags_dict) tuples
-        e.g. ("vol-0abc", "gp2-100GB", "in-use", {"purpose": "practice"})
-    """
-    raise NotImplementedError("TODO: implement _list_volume")
+    """List EBS volumes matching tag filters."""
+    ec2 = boto3.client("ec2")
+    rows = []
+    paginator = ec2.get_paginator("describe_volumes")
+    for page in paginator.paginate():
+        for vol in page.get("Volumes", []):
+            tags = tags_to_dict(vol.get("Tags"))
+            if not tags_match(tags, want, missing):
+                continue
+            type_size = f"{vol.get('VolumeType', 'unknown')}-{vol.get('Size', 0)}GB"
+            rows.append((
+                vol["VolumeId"],
+                type_size,
+                vol.get("State", "unknown"),
+                tags,
+            ))
+    return rows
 
 
 DISPATCH = {
@@ -94,18 +132,28 @@ DISPATCH = {
 }
 
 
+def _format_tags(tags):
+    if not tags:
+        return "(no tags)"
+    return " ".join(f"{k}={v}" for k, v in sorted(tags.items()))
+
+
+def _header(rtype, want, missing, count):
+    bits = []
+    for k, v in want:
+        bits.append(f"{k}={v}")
+    for k in missing:
+        bits.append(f"missing:{k}")
+    filter_str = " ".join(bits) if bits else "(no filter)"
+    return f"{rtype.upper()} {filter_str} — {count} found:"
+
+
 def run(args):
-    """Entry point called by costctl.py.
-
-    Steps you should perform:
-      1. Convert args.tag (list of "k=v" strings) → want pairs via parse_kv
-      2. Use args.missing_tag (list of keys) as-is
-      3. Call DISPATCH[args.type](want, missing) → rows
-      4. Print a header line, separator, then one row per resource
-
-    Args set by argparse:
-        args.type         — one of "ec2", "rds", "s3", "volume"
-        args.tag          — list[str], each "key=value"
-        args.missing_tag  — list[str], each "key"
-    """
-    raise NotImplementedError("TODO: implement run() — see module docstring")
+    """Entry point called by costctl.py."""
+    want = [parse_kv(s) for s in (args.tag or [])]
+    missing = list(args.missing_tag or [])
+    rows = DISPATCH[args.type](want, missing)
+    print(_header(args.type, want, missing, len(rows)))
+    print("-" * 78)
+    for rid, rtype_or_class, state, tags in rows:
+        print(f"  {rid:<24} {rtype_or_class:<14} {state:<13} {_format_tags(tags)}")
